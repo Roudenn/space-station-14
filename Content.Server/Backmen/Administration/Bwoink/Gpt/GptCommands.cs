@@ -1,6 +1,6 @@
 ﻿using System.Linq;
-using System.Text.Json;
 using Content.Server.Administration.Managers;
+using Content.Server.Administration.Notes;
 using Content.Server.Backmen.Administration.Bwoink.Gpt.Models;
 using Content.Server.GameTicking;
 using Content.Server.Mind;
@@ -11,12 +11,15 @@ using Content.Shared.Humanoid;
 using Content.Shared.Mind;
 using Content.Shared.Mobs.Systems;
 using Robust.Server.Player;
+using Robust.Shared.Prototypes;
 
 namespace Content.Server.Backmen.Administration.Bwoink.Gpt;
 
 public sealed class GptCommands : EntitySystem
 {
+    AdminNotesManager
     [Dependency] private readonly GptAhelpSystem _gptAhelpSystem = default!;
+    [Dependency] private readonly PrototypeManager _prototypeManager = default!;
     [Dependency] private readonly GameTicker _gameTicker = default!;
     [Dependency] private readonly IPlayerManager _playerManager = default!;
     [Dependency] private readonly MindSystem _mindSystem = default!;
@@ -82,6 +85,54 @@ public sealed class GptCommands : EntitySystem
         });
         _gptAhelpSystem.AddFunction(new
         {
+            name = "get_server_name",
+            description = "получить название игрового сервера",
+            parameters = new
+            {
+                @type = "object",
+                properties = new {}
+            }
+        });
+        _gptAhelpSystem.AddFunction(new
+        {
+            name = "get_current_gamemode",
+            description = "получить название текущего игрового режима",
+            parameters = new
+            {
+                @type = "object",
+                properties = new {}
+            }
+        });
+        _gptAhelpSystem.AddFunction(new
+        {
+            name = "get_current_admins",
+            description = "получить все заметки администраторов о игроке",
+            parameters = new
+            {
+                @type = "object",
+                properties = new {}
+            }
+        });
+        _gptAhelpSystem.AddFunction(new
+        {
+            name = EntityPrototypeFn,
+            description = "получить имя, описание, суффикс, ID и список всех компонентов игровой сущности через его ID или имя",
+            parameters = new
+            {
+                @type = "object",
+                properties = new
+                {
+                    entity = new
+                    {
+                        @type = "string",
+                        description = "ID или имя игровой сущности о которой спрашивают"
+                    }
+                }
+            },
+            required = new []{ "entity" }
+        });
+        _gptAhelpSystem.AddFunction(new
+        {
             name = PlayerAntagInfoFn,
             description = "является персонаж антаганистом",
             parameters = new
@@ -116,6 +167,18 @@ public sealed class GptCommands : EntitySystem
                 break;
             case "get_current_round_time":
                 ev.History.Messages.Add(new GptMessageFunction(fnName, new { time = _gameTicker.RoundDuration() }));
+                ev.Handled = true;
+                break;
+            case "get_server_name":
+                ev.History.Messages.Add(new GptMessageFunction(fnName, new { serverName = _gameTicker.ServerName }));
+                ev.Handled = true;
+                break;
+            case "get_current_gamemode":
+                ev.History.Messages.Add(new GptMessageFunction(fnName, new { serverName = _gameTicker.CurrentPreset!.ToString() }));
+                ev.Handled = true;
+                break;
+            case EntityPrototypeFn:
+                GetEntityPrototypeInfo(ev);
                 ev.Handled = true;
                 break;
             case PlayerInfoFn:
@@ -187,6 +250,35 @@ public sealed class GptCommands : EntitySystem
         ev.History.Messages.Add(new GptMessageFunction(PlayerAntagInfoFn, new { matchNames = antag, isAntag = antag.Count > 0 }));
     }
 
+    private const string EntityPrototypeFn = "get_entity_prototype";
+
+    private void GetEntityPrototypeInfo(EventGptFunctionCall ev)
+    {
+        var message = ev.Msg.message.content!;
+        if (!_prototypeManager.TryIndex(message, out var proto, false))
+        {
+            // Try to find it by a name
+            var namedPrototype = _prototypeManager.EnumeratePrototypes<EntityPrototype>().FirstOrDefault(x => x.Name == message);
+            if (namedPrototype == null)
+            {
+                ev.History.Messages.Add(new GptMessageFunction(EntityPrototypeFn)); // no info
+                return;
+            }
+
+            proto = namedPrototype;
+        }
+
+        var components = proto.Components.Keys.ToList();
+        var info = new Dictionary<string, object?>
+        {
+            ["ID"] = proto.ID,
+            ["Name"] = proto.Name,
+            ["Description"] = proto.Description,
+            ["Suffix"] = proto.EditorSuffix,
+        };
+
+        ev.History.Messages.Add(new GptMessageFunction(EntityPrototypeFn, new { info, components }));
+    }
 
     private const string PlayerInfoFn = "get_current_char";
     private void GetPlayerInfo(EventGptFunctionCall ev)
