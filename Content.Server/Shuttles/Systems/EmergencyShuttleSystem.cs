@@ -604,6 +604,17 @@ public sealed partial class EmergencyShuttleSystem : EntitySystem
             }
         }
 
+        // start-backmen: centcomm
+        var centComGrid = _centcommSystem.CentComGrid;
+        if (TerminatingOrDeleted(centComGrid))
+            return false;
+
+        if (IsOnGrid(xform, centComGrid))
+        {
+            return true;
+        }
+        // end-backmen: centcomm
+
         return false;
     }
 
